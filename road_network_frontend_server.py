@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import os
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+from pathlib import Path
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Serve the road network frontend locally.")
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind, default 127.0.0.1")
+    parser.add_argument("--port", type=int, default=8000, help="Port to bind, default 8000")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    root = Path(__file__).resolve().parent
+    os.chdir(root)
+
+    server = ThreadingHTTPServer((args.host, args.port), SimpleHTTPRequestHandler)
+    url = f"http://{args.host}:{args.port}/road_network_frontend.html"
+    print(f"Serving frontend from: {root}")
+    print(f"Open in your browser: {url}")
+    print("Press Ctrl+C to stop.")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

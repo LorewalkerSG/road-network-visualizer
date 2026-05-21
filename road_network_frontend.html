@@ -1,0 +1,1357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Road Network Frontend Viewer</title>
+  <style>
+    :root {
+      --bg: #f2efe7;
+      --panel: rgba(255, 251, 243, 0.96);
+      --panel-border: rgba(61, 45, 32, 0.12);
+      --text: #2b241f;
+      --muted: #6d6258;
+      --accent: #0f766e;
+      --accent-soft: #d7f0ec;
+      --danger: #b42318;
+      --canvas: #fffdf8;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.12), transparent 30%),
+        radial-gradient(circle at bottom right, rgba(202, 138, 4, 0.10), transparent 32%),
+        var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      height: 100%;
+    }
+
+    .sidebar {
+      padding: 18px 16px;
+      background: var(--panel);
+      border-right: 1px solid var(--panel-border);
+      backdrop-filter: blur(10px);
+      overflow-y: auto;
+    }
+
+    .viewer-shell {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    #glCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.78), rgba(248,244,235,0.95)),
+        var(--canvas);
+      cursor: grab;
+    }
+
+    #glCanvas.dragging {
+      cursor: grabbing;
+    }
+
+    #glCanvas.selection-mode {
+      cursor: crosshair;
+    }
+
+    #overlayCanvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      pointer-events: none;
+    }
+
+    .panel-title {
+      margin: 0 0 6px;
+      font-size: 23px;
+      line-height: 1.1;
+      letter-spacing: 0.01em;
+    }
+
+    .panel-subtitle {
+      margin: 0 0 18px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .group {
+      margin-bottom: 18px;
+      padding: 14px;
+      border: 1px solid rgba(61, 45, 32, 0.08);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.64);
+    }
+
+    .group h2 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    label {
+      display: block;
+      margin-bottom: 10px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    input[type="file"],
+    input[type="color"],
+    input[type="range"],
+    button {
+      width: 100%;
+    }
+
+    input[type="file"] {
+      margin-top: 6px;
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px dashed rgba(61, 45, 32, 0.18);
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    input[type="range"] {
+      accent-color: var(--accent);
+    }
+
+    input[type="color"] {
+      height: 40px;
+      padding: 3px;
+      border-radius: 10px;
+      border: 1px solid rgba(61, 45, 32, 0.14);
+      background: white;
+    }
+
+    .button-row {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 11px 14px;
+      font-size: 14px;
+      font-weight: 700;
+      color: white;
+      background: linear-gradient(135deg, #0f766e, #155e75);
+      box-shadow: 0 10px 18px rgba(15, 118, 110, 0.18);
+      transition: transform 120ms ease, opacity 120ms ease;
+    }
+
+    button.secondary {
+      color: var(--text);
+      background: linear-gradient(135deg, #efe7db, #faf5eb);
+      box-shadow: none;
+      border: 1px solid rgba(61, 45, 32, 0.12);
+    }
+
+    button.active {
+      background: linear-gradient(135deg, #b42318, #dc2626);
+      box-shadow: 0 10px 18px rgba(180, 35, 24, 0.18);
+      color: white;
+      border: 0;
+    }
+
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    button:not(:disabled):hover {
+      transform: translateY(-1px);
+    }
+
+    .metric {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      padding: 8px 0;
+      border-bottom: 1px dashed rgba(61, 45, 32, 0.12);
+      font-size: 13px;
+    }
+
+    .metric:last-child {
+      border-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .metric .name {
+      color: var(--muted);
+    }
+
+    .metric .value {
+      font-weight: 700;
+    }
+
+    .status {
+      margin-top: 8px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: var(--accent-soft);
+      color: #0f514c;
+      font-size: 13px;
+      line-height: 1.45;
+      min-height: 56px;
+      white-space: pre-wrap;
+    }
+
+    .status.error {
+      background: rgba(180, 35, 24, 0.10);
+      color: var(--danger);
+    }
+
+    .overlay {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      pointer-events: none;
+    }
+
+    .chip {
+      padding: 10px 12px;
+      border-radius: 999px;
+      background: rgba(255, 251, 243, 0.88);
+      border: 1px solid rgba(61, 45, 32, 0.10);
+      backdrop-filter: blur(8px);
+      font-size: 12px;
+      color: var(--muted);
+      box-shadow: 0 8px 18px rgba(61, 45, 32, 0.08);
+    }
+
+    .kbd {
+      display: inline-block;
+      min-width: 22px;
+      margin: 0 3px;
+      padding: 2px 6px;
+      border-radius: 7px;
+      border: 1px solid rgba(61, 45, 32, 0.16);
+      background: white;
+      color: var(--text);
+      text-align: center;
+      font-weight: 700;
+    }
+
+    @media (max-width: 900px) {
+      .app {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr;
+      }
+
+      .sidebar {
+        border-right: 0;
+        border-bottom: 1px solid var(--panel-border);
+      }
+
+      .overlay {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <h1 class="panel-title">Road Network Viewer</h1>
+      <p class="panel-subtitle">
+        选择本地 <code>.co</code> 和 <code>.gr</code> 文件后，直接在浏览器里做真实平移与缩放。
+        现在支持选中模式、悬停顶点提示、双点最短路径计算与路径高亮。
+      </p>
+
+      <section class="group">
+        <h2>Data</h2>
+        <label>
+          Coordinate file (.co)
+          <input id="coFile" type="file" accept=".co,.txt" />
+        </label>
+        <label>
+          Graph file (.gr)
+          <input id="grFile" type="file" accept=".gr,.txt" />
+        </label>
+        <div class="button-row">
+          <button id="loadButton">Load Network</button>
+          <button id="fitButton" class="secondary" disabled>Fit View</button>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2>Style</h2>
+        <label>
+          Edge color
+          <input id="edgeColor" type="color" value="#1f2a30" />
+        </label>
+        <label>
+          Edge opacity
+          <input id="edgeOpacity" type="range" min="0.05" max="1" step="0.05" value="0.8" />
+        </label>
+      </section>
+
+      <section class="group">
+        <h2>Selection</h2>
+        <div class="button-row">
+          <button id="selectModeButton" class="secondary" disabled>Enter Select Mode</button>
+          <button id="clearSelectionButton" class="secondary" disabled>Clear Picks</button>
+        </div>
+        <div class="metric"><span class="name">Mode</span><span id="selectionModeValue" class="value">off</span></div>
+        <div class="metric"><span class="name">Hover vertex</span><span id="hoverVertexValue" class="value">-</span></div>
+        <div class="metric"><span class="name">Start vertex</span><span id="startVertexValue" class="value">-</span></div>
+        <div class="metric"><span class="name">End vertex</span><span id="endVertexValue" class="value">-</span></div>
+        <div class="metric"><span class="name">Path distance</span><span id="pathDistanceValue" class="value">-</span></div>
+      </section>
+
+      <section class="group">
+        <h2>Stats</h2>
+        <div class="metric"><span class="name">Nodes</span><span id="nodeCount" class="value">-</span></div>
+        <div class="metric"><span class="name">Input edges</span><span id="inputEdgeCount" class="value">-</span></div>
+        <div class="metric"><span class="name">Undirected edges</span><span id="edgeCount" class="value">-</span></div>
+        <div class="metric"><span class="name">Bounds</span><span id="boundsValue" class="value">-</span></div>
+      </section>
+
+      <section class="group">
+        <h2>Status</h2>
+        <div id="statusBox" class="status">等待加载数据。</div>
+      </section>
+    </aside>
+
+    <main class="viewer-shell">
+      <canvas id="glCanvas"></canvas>
+      <canvas id="overlayCanvas"></canvas>
+      <div class="overlay">
+        <div class="chip">
+          拖拽平移 · 滚轮缩放 · 选中模式下单击顶点 · <span class="kbd">R</span> 重置视图
+        </div>
+        <div id="viewLabel" class="chip">No data loaded</div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const SCALE = 1_000_000;
+
+    const elements = {
+      canvas: document.getElementById("glCanvas"),
+      overlayCanvas: document.getElementById("overlayCanvas"),
+      coFile: document.getElementById("coFile"),
+      grFile: document.getElementById("grFile"),
+      loadButton: document.getElementById("loadButton"),
+      fitButton: document.getElementById("fitButton"),
+      selectModeButton: document.getElementById("selectModeButton"),
+      clearSelectionButton: document.getElementById("clearSelectionButton"),
+      edgeColor: document.getElementById("edgeColor"),
+      edgeOpacity: document.getElementById("edgeOpacity"),
+      selectionModeValue: document.getElementById("selectionModeValue"),
+      hoverVertexValue: document.getElementById("hoverVertexValue"),
+      startVertexValue: document.getElementById("startVertexValue"),
+      endVertexValue: document.getElementById("endVertexValue"),
+      pathDistanceValue: document.getElementById("pathDistanceValue"),
+      nodeCount: document.getElementById("nodeCount"),
+      inputEdgeCount: document.getElementById("inputEdgeCount"),
+      edgeCount: document.getElementById("edgeCount"),
+      boundsValue: document.getElementById("boundsValue"),
+      statusBox: document.getElementById("statusBox"),
+      viewLabel: document.getElementById("viewLabel"),
+    };
+
+    const state = {
+      coords: null,
+      edgeVertices: null,
+      adjacency: null,
+      spatialIndex: null,
+      nodeCount: 0,
+      inputEdgeCount: 0,
+      edgeCount: 0,
+      bounds: null,
+      selection: {
+        mode: false,
+        hoverVertexId: null,
+        startVertexId: null,
+        endVertexId: null,
+        pathVertexIds: [],
+        pathDistance: null,
+        computing: false,
+      },
+      view: {
+        centerX: 0,
+        centerY: 0,
+        zoom: 1,
+        baseWidth: 1,
+        baseHeight: 1,
+      },
+      dragging: false,
+      lastPointer: null,
+      dragMoved: false,
+      renderRequested: false,
+    };
+
+    const gl = elements.canvas.getContext("webgl", {
+      antialias: true,
+      preserveDrawingBuffer: false,
+    });
+
+    if (!gl) {
+      setStatus("当前浏览器环境不支持 WebGL，无法运行这个前端可视化器。", true);
+      elements.loadButton.disabled = true;
+      throw new Error("WebGL unavailable");
+    }
+
+    const overlayContext = elements.overlayCanvas.getContext("2d");
+    const programInfo = createProgram(gl);
+    const edgeBuffer = gl.createBuffer();
+
+    resizeCanvas();
+    installEvents();
+    updateSelectionControls();
+    render();
+
+    function installEvents() {
+      window.addEventListener("resize", () => {
+        resizeCanvas();
+        requestRender();
+      });
+
+      elements.loadButton.addEventListener("click", loadFiles);
+      elements.fitButton.addEventListener("click", () => {
+        if (!state.bounds) {
+          return;
+        }
+        fitViewToBounds();
+        requestRender();
+      });
+      elements.selectModeButton.addEventListener("click", toggleSelectionMode);
+      elements.clearSelectionButton.addEventListener("click", () => {
+        clearSelection(true);
+        requestRender();
+      });
+
+      elements.edgeColor.addEventListener("input", requestRender);
+      elements.edgeOpacity.addEventListener("input", requestRender);
+
+      elements.canvas.addEventListener("mousedown", (event) => {
+        if (!state.bounds) {
+          return;
+        }
+        state.dragging = true;
+        state.lastPointer = { x: event.clientX, y: event.clientY };
+        state.dragMoved = false;
+        elements.canvas.classList.add("dragging");
+        updateCanvasCursor();
+      });
+
+      window.addEventListener("mouseup", (event) => {
+        const wasDragging = state.dragging;
+        const wasMoved = state.dragMoved;
+        state.dragging = false;
+        state.lastPointer = null;
+        state.dragMoved = false;
+        elements.canvas.classList.remove("dragging");
+        updateCanvasCursor();
+
+        if (!wasDragging || wasMoved || !state.selection.mode || !state.bounds) {
+          return;
+        }
+        const rect = elements.canvas.getBoundingClientRect();
+        const px = event.clientX - rect.left;
+        const py = event.clientY - rect.top;
+        handleSelectionClick(px, py);
+      });
+
+      window.addEventListener("mousemove", (event) => {
+        if (state.dragging && state.lastPointer) {
+          const dx = event.clientX - state.lastPointer.x;
+          const dy = event.clientY - state.lastPointer.y;
+          if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+            state.dragMoved = true;
+          }
+          state.lastPointer = { x: event.clientX, y: event.clientY };
+          panByPixels(dx, dy);
+          requestRender();
+          return;
+        }
+
+        if (state.selection.mode && state.bounds) {
+          updateHoverFromEvent(event);
+        }
+      });
+
+      elements.canvas.addEventListener("wheel", (event) => {
+        if (!state.bounds) {
+          return;
+        }
+        event.preventDefault();
+        const rect = elements.canvas.getBoundingClientRect();
+        const px = event.clientX - rect.left;
+        const py = event.clientY - rect.top;
+        const zoomFactor = Math.exp(-event.deltaY * 0.0015);
+        zoomAtPixel(px, py, zoomFactor);
+        if (state.selection.mode) {
+          const syntheticEvent = { clientX: event.clientX, clientY: event.clientY };
+          updateHoverFromEvent(syntheticEvent);
+        }
+        requestRender();
+      }, { passive: false });
+
+      window.addEventListener("keydown", (event) => {
+        if (event.key.toLowerCase() === "r" && state.bounds) {
+          fitViewToBounds();
+          requestRender();
+        }
+      });
+    }
+
+    async function loadFiles() {
+      const coFile = elements.coFile.files[0];
+      const grFile = elements.grFile.files[0];
+
+      if (!coFile || !grFile) {
+        setStatus("请先选择 .co 和 .gr 文件。", true);
+        return;
+      }
+
+      try {
+        elements.loadButton.disabled = true;
+        elements.fitButton.disabled = true;
+        elements.selectModeButton.disabled = true;
+        elements.clearSelectionButton.disabled = true;
+        setStatus("正在读取坐标文件...");
+
+        const coText = await coFile.text();
+        const coData = parseCoordinateText(coText);
+        await yieldToUI();
+
+        setStatus("坐标已读取，正在读取边文件、构建邻接并去重...");
+        const grText = await grFile.text();
+        const grData = parseGraphText(grText, coData);
+
+        state.coords = coData.coords;
+        state.edgeVertices = grData.edgeVertices;
+        state.adjacency = grData.adjacency;
+        state.spatialIndex = buildSpatialIndex(coData.coords, coData.bounds);
+        state.nodeCount = coData.nodeCount;
+        state.inputEdgeCount = grData.inputEdgeCount;
+        state.edgeCount = grData.edgeCount;
+        state.bounds = coData.bounds;
+        state.selection.mode = false;
+        clearSelection(false);
+
+        uploadEdgesToGPU();
+        fitViewToBounds();
+        updateStats();
+        updateSelectionControls();
+        setStatus(
+          [
+            "加载完成。",
+            `节点数: ${formatNumber(state.nodeCount)}`,
+            `输入边数: ${formatNumber(state.inputEdgeCount)}`,
+            `去重后无向边数: ${formatNumber(state.edgeCount)}`,
+            "可进入选中模式后单击两个顶点，计算最短路径。"
+          ].join("\n")
+        );
+        elements.fitButton.disabled = false;
+        requestRender();
+      } catch (error) {
+        console.error(error);
+        setStatus(`加载失败: ${error.message}`, true);
+      } finally {
+        elements.loadButton.disabled = false;
+        updateSelectionControls();
+      }
+    }
+
+    function parseCoordinateText(text) {
+      const ints = createIntegerReader(text);
+      const nodeCount = ints.nextRequired("missing node count in .co");
+      const coords = new Float32Array(nodeCount * 2);
+
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+
+      for (let i = 0; i < nodeCount; i += 1) {
+        const id = ints.nextRequired("unexpected end of .co while reading node id");
+        const lon = ints.nextRequired("unexpected end of .co while reading longitude") / SCALE;
+        const lat = ints.nextRequired("unexpected end of .co while reading latitude") / SCALE;
+
+        const index = (id - 1) * 2;
+        coords[index] = lon;
+        coords[index + 1] = lat;
+
+        if (lon < minX) minX = lon;
+        if (lon > maxX) maxX = lon;
+        if (lat < minY) minY = lat;
+        if (lat > maxY) maxY = lat;
+      }
+
+      return {
+        coords,
+        nodeCount,
+        bounds: { minX, maxX, minY, maxY },
+      };
+    }
+
+    function parseGraphText(text, coData) {
+      const firstPass = createIntegerReader(text);
+      const expectedNodeCount = firstPass.nextRequired("missing node count in .gr");
+      const inputEdgeCount = firstPass.nextRequired("missing edge count in .gr");
+
+      if (expectedNodeCount !== coData.nodeCount) {
+        throw new Error(`.co 节点数为 ${coData.nodeCount}，但 .gr 节点数为 ${expectedNodeCount}`);
+      }
+
+      const degree = new Int32Array(coData.nodeCount);
+      let uniqueEdgeCount = 0;
+      for (let i = 0; i < inputEdgeCount; i += 1) {
+        const a = firstPass.nextRequired("unexpected end of .gr while reading edge source");
+        const b = firstPass.nextRequired("unexpected end of .gr while reading edge target");
+        firstPass.nextRequired("unexpected end of .gr while reading edge weight");
+        degree[a - 1] += 1;
+        if (a < b) {
+          uniqueEdgeCount += 1;
+        }
+      }
+
+      const offsets = new Int32Array(coData.nodeCount + 1);
+      for (let i = 0; i < coData.nodeCount; i += 1) {
+        offsets[i + 1] = offsets[i] + degree[i];
+      }
+
+      const fill = offsets.slice();
+      const to = new Int32Array(inputEdgeCount);
+      const weight = new Int32Array(inputEdgeCount);
+      const edgeVertices = new Float32Array(uniqueEdgeCount * 4);
+
+      const secondPass = createIntegerReader(text);
+      secondPass.nextRequired("missing node count in .gr");
+      secondPass.nextRequired("missing edge count in .gr");
+
+      let cursor = 0;
+      for (let i = 0; i < inputEdgeCount; i += 1) {
+        const a = secondPass.nextRequired("unexpected end of .gr while filling source");
+        const b = secondPass.nextRequired("unexpected end of .gr while filling target");
+        const w = secondPass.nextRequired("unexpected end of .gr while reading weight");
+
+        const directedIndex = fill[a - 1];
+        to[directedIndex] = b - 1;
+        weight[directedIndex] = w;
+        fill[a - 1] += 1;
+
+        if (a >= b) {
+          continue;
+        }
+
+        const ia = (a - 1) * 2;
+        const ib = (b - 1) * 2;
+        edgeVertices[cursor] = coData.coords[ia];
+        edgeVertices[cursor + 1] = coData.coords[ia + 1];
+        edgeVertices[cursor + 2] = coData.coords[ib];
+        edgeVertices[cursor + 3] = coData.coords[ib + 1];
+        cursor += 4;
+      }
+
+      return {
+        inputEdgeCount,
+        edgeCount: uniqueEdgeCount,
+        edgeVertices,
+        adjacency: {
+          offsets,
+          to,
+          weight,
+        },
+      };
+    }
+
+    function createIntegerReader(text) {
+      let index = 0;
+      const length = text.length;
+
+      function skipWhitespace() {
+        while (index < length) {
+          const code = text.charCodeAt(index);
+          if (code > 32) {
+            break;
+          }
+          index += 1;
+        }
+      }
+
+      return {
+        nextRequired(message) {
+          skipWhitespace();
+          if (index >= length) {
+            throw new Error(message);
+          }
+
+          let sign = 1;
+          if (text.charCodeAt(index) === 45) {
+            sign = -1;
+            index += 1;
+          }
+
+          let value = 0;
+          let sawDigit = false;
+          while (index < length) {
+            const code = text.charCodeAt(index);
+            if (code < 48 || code > 57) {
+              break;
+            }
+            value = value * 10 + (code - 48);
+            index += 1;
+            sawDigit = true;
+          }
+
+          if (!sawDigit) {
+            throw new Error(message);
+          }
+          return sign * value;
+        }
+      };
+    }
+
+    function uploadEdgesToGPU() {
+      gl.bindBuffer(gl.ARRAY_BUFFER, edgeBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, state.edgeVertices, gl.STATIC_DRAW);
+    }
+
+    function buildSpatialIndex(coords, bounds) {
+      const nodeCount = coords.length / 2;
+      const width = Math.max(bounds.maxX - bounds.minX, 1e-9);
+      const height = Math.max(bounds.maxY - bounds.minY, 1e-9);
+      const aspect = width / height;
+      const targetCells = clampInt(Math.round(nodeCount / 8), 4096, 262144);
+      const cellsX = clampInt(Math.round(Math.sqrt(targetCells * aspect)), 32, 512);
+      const cellsY = clampInt(Math.round(targetCells / cellsX), 32, 512);
+      const heads = new Int32Array(cellsX * cellsY);
+      const next = new Int32Array(nodeCount);
+      heads.fill(-1);
+      next.fill(-1);
+
+      for (let vertexIndex = 0; vertexIndex < nodeCount; vertexIndex += 1) {
+        const coordIndex = vertexIndex * 2;
+        const x = coords[coordIndex];
+        const y = coords[coordIndex + 1];
+        const cellX = clampInt(Math.floor(((x - bounds.minX) / width) * cellsX), 0, cellsX - 1);
+        const cellY = clampInt(Math.floor(((y - bounds.minY) / height) * cellsY), 0, cellsY - 1);
+        const cellIndex = cellY * cellsX + cellX;
+        next[vertexIndex] = heads[cellIndex];
+        heads[cellIndex] = vertexIndex;
+      }
+
+      return {
+        bounds,
+        width,
+        height,
+        cellsX,
+        cellsY,
+        heads,
+        next,
+      };
+    }
+
+    function fitViewToBounds() {
+      const { minX, maxX, minY, maxY } = state.bounds;
+      const width = Math.max(maxX - minX, 1e-9);
+      const height = Math.max(maxY - minY, 1e-9);
+      const aspect = gl.canvas.width / gl.canvas.height;
+      const paddedWidth = width * 1.04;
+      const paddedHeight = height * 1.04;
+
+      let baseWidth = paddedWidth;
+      let baseHeight = paddedHeight;
+      if (paddedWidth / paddedHeight > aspect) {
+        baseHeight = paddedWidth / aspect;
+      } else {
+        baseWidth = paddedHeight * aspect;
+      }
+
+      state.view.centerX = (minX + maxX) * 0.5;
+      state.view.centerY = (minY + maxY) * 0.5;
+      state.view.baseWidth = baseWidth;
+      state.view.baseHeight = baseHeight;
+      state.view.zoom = 1;
+    }
+
+    function panByPixels(dx, dy) {
+      const viewWidth = state.view.baseWidth / state.view.zoom;
+      const viewHeight = state.view.baseHeight / state.view.zoom;
+      state.view.centerX -= (dx / gl.canvas.width) * viewWidth;
+      state.view.centerY += (dy / gl.canvas.height) * viewHeight;
+    }
+
+    function zoomAtPixel(px, py, zoomFactor) {
+      const before = screenToWorld(px, py);
+      state.view.zoom = clamp(state.view.zoom * zoomFactor, 0.25, 1_000_000);
+      const after = screenToWorld(px, py);
+      state.view.centerX += before.x - after.x;
+      state.view.centerY += before.y - after.y;
+    }
+
+    function screenToWorld(px, py) {
+      const viewWidth = state.view.baseWidth / state.view.zoom;
+      const viewHeight = state.view.baseHeight / state.view.zoom;
+      const nx = (px / elements.canvas.clientWidth) * 2 - 1;
+      const ny = 1 - (py / elements.canvas.clientHeight) * 2;
+      return {
+        x: state.view.centerX + nx * viewWidth * 0.5,
+        y: state.view.centerY + ny * viewHeight * 0.5,
+      };
+    }
+
+    function worldToScreen(x, y) {
+      const viewWidth = state.view.baseWidth / state.view.zoom;
+      const viewHeight = state.view.baseHeight / state.view.zoom;
+      return {
+        x: ((x - state.view.centerX) / viewWidth + 0.5) * elements.canvas.clientWidth,
+        y: ((state.view.centerY - y) / viewHeight + 0.5) * elements.canvas.clientHeight,
+      };
+    }
+
+    function worldToScreenByVertexId(vertexId) {
+      const offset = (vertexId - 1) * 2;
+      return worldToScreen(state.coords[offset], state.coords[offset + 1]);
+    }
+
+    function requestRender() {
+      if (state.renderRequested) {
+        return;
+      }
+      state.renderRequested = true;
+      requestAnimationFrame(() => {
+        state.renderRequested = false;
+        render();
+      });
+    }
+
+    function render() {
+      const dpr = window.devicePixelRatio || 1;
+      gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+      const bg = hexToRgb("#fffdf8");
+      gl.clearColor(bg[0], bg[1], bg[2], 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      overlayContext.clearRect(0, 0, elements.overlayCanvas.width, elements.overlayCanvas.height);
+
+      if (!state.edgeVertices || state.edgeCount === 0) {
+        updateViewLabel();
+        return;
+      }
+
+      gl.useProgram(programInfo.program);
+      gl.bindBuffer(gl.ARRAY_BUFFER, edgeBuffer);
+      gl.enableVertexAttribArray(programInfo.attributes.position);
+      gl.vertexAttribPointer(programInfo.attributes.position, 2, gl.FLOAT, false, 0, 0);
+
+      const viewWidth = state.view.baseWidth / state.view.zoom;
+      const viewHeight = state.view.baseHeight / state.view.zoom;
+      const scaleX = 2 / viewWidth;
+      const scaleY = 2 / viewHeight;
+      const color = hexToRgb(elements.edgeColor.value);
+      const opacity = parseFloat(elements.edgeOpacity.value);
+
+      gl.uniform2f(programInfo.uniforms.center, state.view.centerX, state.view.centerY);
+      gl.uniform2f(programInfo.uniforms.scale, scaleX, scaleY);
+      gl.uniform4f(programInfo.uniforms.color, color[0], color[1], color[2], opacity);
+      gl.drawArrays(gl.LINES, 0, state.edgeCount * 2);
+
+      renderOverlay(dpr);
+      updateViewLabel(dpr, viewWidth, viewHeight);
+    }
+
+    function renderOverlay(dpr) {
+      if (!state.bounds) {
+        return;
+      }
+
+      overlayContext.save();
+      overlayContext.scale(dpr, dpr);
+      drawPathOverlay();
+      drawVertexMarker(state.selection.hoverVertexId, "rgba(245, 158, 11, 0.95)", 6.2, 2.4);
+      drawVertexMarker(state.selection.startVertexId, "rgba(13, 148, 136, 1)", 8.0, 3.0);
+      drawVertexMarker(state.selection.endVertexId, "rgba(220, 38, 38, 1)", 8.8, 3.2);
+      overlayContext.restore();
+    }
+
+    function drawPathOverlay() {
+      const path = state.selection.pathVertexIds;
+      if (!path || path.length < 2) {
+        return;
+      }
+
+      const first = worldToScreenByVertexId(path[0]);
+      overlayContext.beginPath();
+      overlayContext.moveTo(first.x, first.y);
+      for (let i = 1; i < path.length; i += 1) {
+        const point = worldToScreenByVertexId(path[i]);
+        overlayContext.lineTo(point.x, point.y);
+      }
+      overlayContext.strokeStyle = "rgba(220, 38, 38, 0.95)";
+      overlayContext.lineWidth = 3.4;
+      overlayContext.lineJoin = "round";
+      overlayContext.lineCap = "round";
+      overlayContext.stroke();
+    }
+
+    function drawVertexMarker(vertexId, color, radius, innerRadius) {
+      if (vertexId == null) {
+        return;
+      }
+      const point = worldToScreenByVertexId(vertexId);
+      overlayContext.beginPath();
+      overlayContext.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      overlayContext.fillStyle = color;
+      overlayContext.fill();
+      overlayContext.beginPath();
+      overlayContext.arc(point.x, point.y, innerRadius, 0, Math.PI * 2);
+      overlayContext.fillStyle = "rgba(255, 255, 255, 0.96)";
+      overlayContext.fill();
+    }
+
+    function updateViewLabel(dpr = window.devicePixelRatio || 1, viewWidth = 0, viewHeight = 0) {
+      if (!state.bounds) {
+        elements.viewLabel.textContent = "No data loaded";
+        return;
+      }
+      elements.viewLabel.textContent =
+        `zoom=${state.view.zoom.toFixed(2)} · view=${viewWidth.toFixed(4)} x ${viewHeight.toFixed(4)} · mode=${state.selection.mode ? "select" : "pan"} · dpr=${dpr.toFixed(2)}`;
+    }
+
+    function updateStats() {
+      elements.nodeCount.textContent = formatNumber(state.nodeCount);
+      elements.inputEdgeCount.textContent = formatNumber(state.inputEdgeCount);
+      elements.edgeCount.textContent = formatNumber(state.edgeCount);
+      const { minX, maxX, minY, maxY } = state.bounds;
+      elements.boundsValue.textContent = `${minX.toFixed(3)}, ${minY.toFixed(3)} → ${maxX.toFixed(3)}, ${maxY.toFixed(3)}`;
+    }
+
+    function updateSelectionStats() {
+      elements.selectionModeValue.textContent = state.selection.mode ? "on" : "off";
+      elements.hoverVertexValue.textContent = state.selection.hoverVertexId == null ? "-" : state.selection.hoverVertexId;
+      elements.startVertexValue.textContent = state.selection.startVertexId == null ? "-" : state.selection.startVertexId;
+      elements.endVertexValue.textContent = state.selection.endVertexId == null ? "-" : state.selection.endVertexId;
+      elements.pathDistanceValue.textContent =
+        state.selection.pathDistance == null ? "-" : formatNumber(Math.round(state.selection.pathDistance));
+    }
+
+    function updateSelectionControls() {
+      const hasData = Boolean(state.bounds);
+      elements.selectModeButton.disabled = !hasData || state.selection.computing;
+      elements.clearSelectionButton.disabled = !hasData || state.selection.computing;
+      elements.selectModeButton.classList.toggle("active", state.selection.mode);
+      elements.selectModeButton.classList.toggle("secondary", !state.selection.mode);
+      elements.selectModeButton.textContent = state.selection.mode ? "Exit Select Mode" : "Enter Select Mode";
+      updateSelectionStats();
+      updateCanvasCursor();
+    }
+
+    function resizeCanvas() {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = elements.canvas.getBoundingClientRect();
+      const width = Math.max(1, Math.round(rect.width * dpr));
+      const height = Math.max(1, Math.round(rect.height * dpr));
+      if (elements.canvas.width !== width || elements.canvas.height !== height) {
+        elements.canvas.width = width;
+        elements.canvas.height = height;
+      }
+      if (elements.overlayCanvas.width !== width || elements.overlayCanvas.height !== height) {
+        elements.overlayCanvas.width = width;
+        elements.overlayCanvas.height = height;
+      }
+      if (state.bounds) {
+        fitViewToBounds();
+      }
+    }
+
+    function setStatus(message, isError = false) {
+      elements.statusBox.textContent = message;
+      elements.statusBox.classList.toggle("error", isError);
+    }
+
+    function formatNumber(value) {
+      return new Intl.NumberFormat("en-US").format(value);
+    }
+
+    function clampInt(value, min, max) {
+      return Math.min(max, Math.max(min, value | 0));
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function hexToRgb(hex) {
+      const clean = hex.replace("#", "");
+      const number = Number.parseInt(clean, 16);
+      return [
+        ((number >> 16) & 255) / 255,
+        ((number >> 8) & 255) / 255,
+        (number & 255) / 255,
+      ];
+    }
+
+    function createProgram(glContext) {
+      const vertexSource = `
+        attribute vec2 a_position;
+        uniform vec2 u_center;
+        uniform vec2 u_scale;
+
+        void main() {
+          vec2 clip = (a_position - u_center) * u_scale;
+          gl_Position = vec4(clip, 0.0, 1.0);
+        }
+      `;
+
+      const fragmentSource = `
+        precision mediump float;
+        uniform vec4 u_color;
+
+        void main() {
+          gl_FragColor = u_color;
+        }
+      `;
+
+      const vertexShader = compileShader(glContext, glContext.VERTEX_SHADER, vertexSource);
+      const fragmentShader = compileShader(glContext, glContext.FRAGMENT_SHADER, fragmentSource);
+      const program = glContext.createProgram();
+      glContext.attachShader(program, vertexShader);
+      glContext.attachShader(program, fragmentShader);
+      glContext.linkProgram(program);
+
+      if (!glContext.getProgramParameter(program, glContext.LINK_STATUS)) {
+        const message = glContext.getProgramInfoLog(program);
+        glContext.deleteProgram(program);
+        throw new Error(`WebGL program link failed: ${message}`);
+      }
+
+      return {
+        program,
+        attributes: {
+          position: glContext.getAttribLocation(program, "a_position"),
+        },
+        uniforms: {
+          center: glContext.getUniformLocation(program, "u_center"),
+          scale: glContext.getUniformLocation(program, "u_scale"),
+          color: glContext.getUniformLocation(program, "u_color"),
+        },
+      };
+    }
+
+    function compileShader(glContext, type, source) {
+      const shader = glContext.createShader(type);
+      glContext.shaderSource(shader, source);
+      glContext.compileShader(shader);
+
+      if (!glContext.getShaderParameter(shader, glContext.COMPILE_STATUS)) {
+        const message = glContext.getShaderInfoLog(shader);
+        glContext.deleteShader(shader);
+        throw new Error(`Shader compile failed: ${message}`);
+      }
+      return shader;
+    }
+
+    function yieldToUI() {
+      return new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+
+    function toggleSelectionMode() {
+      if (!state.bounds) {
+        return;
+      }
+      state.selection.mode = !state.selection.mode;
+      if (!state.selection.mode) {
+        state.selection.hoverVertexId = null;
+      }
+      updateSelectionControls();
+      if (state.selection.mode) {
+        setStatus("选中模式已开启。单击一个顶点作为起点，再单击一个顶点作为终点来计算最短路径。");
+      } else {
+        setStatus("已退出选中模式。仍可继续平移和缩放。", false);
+      }
+      requestRender();
+    }
+
+    function clearSelection(updateStatus) {
+      state.selection.hoverVertexId = null;
+      state.selection.startVertexId = null;
+      state.selection.endVertexId = null;
+      state.selection.pathVertexIds = [];
+      state.selection.pathDistance = null;
+      state.selection.computing = false;
+      updateSelectionStats();
+      updateSelectionControls();
+      if (updateStatus) {
+        setStatus("已清空当前选点和路径。", false);
+      }
+    }
+
+    function updateCanvasCursor() {
+      elements.canvas.classList.toggle("selection-mode", state.selection.mode && !state.dragging);
+    }
+
+    function updateHoverFromEvent(event) {
+      const rect = elements.canvas.getBoundingClientRect();
+      const px = event.clientX - rect.left;
+      const py = event.clientY - rect.top;
+      const hit = pickNearestVertex(px, py, 12);
+      const nextHoverId = hit ? hit.vertexId : null;
+      if (nextHoverId !== state.selection.hoverVertexId) {
+        state.selection.hoverVertexId = nextHoverId;
+        updateSelectionStats();
+        requestRender();
+      }
+    }
+
+    function handleSelectionClick(px, py) {
+      if (state.selection.computing) {
+        return;
+      }
+      const hit = pickNearestVertex(px, py, 14);
+      if (!hit) {
+        setStatus("没有点中顶点。请把视图放大一些后再试。", true);
+        return;
+      }
+
+      const vertexId = hit.vertexId;
+      if (state.selection.startVertexId == null || state.selection.endVertexId != null) {
+        state.selection.startVertexId = vertexId;
+        state.selection.endVertexId = null;
+        state.selection.pathVertexIds = [];
+        state.selection.pathDistance = null;
+        updateSelectionStats();
+        setStatus(`已选择起点: ${vertexId}。请再单击一个终点。`, false);
+        requestRender();
+        return;
+      }
+
+      if (vertexId === state.selection.startVertexId) {
+        setStatus("终点不能和起点相同，请选择另一个顶点。", true);
+        return;
+      }
+
+      state.selection.endVertexId = vertexId;
+      updateSelectionStats();
+      computeShortestPath();
+      requestRender();
+    }
+
+    function pickNearestVertex(px, py, radiusPx) {
+      if (!state.spatialIndex || !state.coords) {
+        return null;
+      }
+
+      const world = screenToWorld(px, py);
+      const viewWidth = state.view.baseWidth / state.view.zoom;
+      const viewHeight = state.view.baseHeight / state.view.zoom;
+      const radiusWorld = Math.max((radiusPx / elements.canvas.clientWidth) * viewWidth, (radiusPx / elements.canvas.clientHeight) * viewHeight);
+      const { bounds, width, height, cellsX, cellsY, heads, next } = state.spatialIndex;
+
+      const minCellX = clampInt(Math.floor(((world.x - radiusWorld - bounds.minX) / width) * cellsX), 0, cellsX - 1);
+      const maxCellX = clampInt(Math.floor(((world.x + radiusWorld - bounds.minX) / width) * cellsX), 0, cellsX - 1);
+      const minCellY = clampInt(Math.floor(((world.y - radiusWorld - bounds.minY) / height) * cellsY), 0, cellsY - 1);
+      const maxCellY = clampInt(Math.floor(((world.y + radiusWorld - bounds.minY) / height) * cellsY), 0, cellsY - 1);
+
+      let bestVertex = -1;
+      let bestDistanceSq = radiusPx * radiusPx;
+
+      for (let cellY = minCellY; cellY <= maxCellY; cellY += 1) {
+        for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+          let current = heads[cellY * cellsX + cellX];
+          while (current !== -1) {
+            const offset = current * 2;
+            const screen = worldToScreen(state.coords[offset], state.coords[offset + 1]);
+            const dx = screen.x - px;
+            const dy = screen.y - py;
+            const distSq = dx * dx + dy * dy;
+            if (distSq <= bestDistanceSq) {
+              bestDistanceSq = distSq;
+              bestVertex = current + 1;
+            }
+            current = next[current];
+          }
+        }
+      }
+
+      return bestVertex === -1 ? null : { vertexId: bestVertex };
+    }
+
+    async function computeShortestPath() {
+      const sourceId = state.selection.startVertexId;
+      const targetId = state.selection.endVertexId;
+      if (sourceId == null || targetId == null || !state.adjacency) {
+        return;
+      }
+
+      state.selection.computing = true;
+      state.selection.pathVertexIds = [];
+      state.selection.pathDistance = null;
+      updateSelectionControls();
+      setStatus(`正在计算 ${sourceId} 到 ${targetId} 的最短路径...`, false);
+      requestRender();
+      await yieldToUI();
+
+      const { offsets, to, weight } = state.adjacency;
+      const nodeCount = state.nodeCount;
+      const source = sourceId - 1;
+      const target = targetId - 1;
+      const distance = new Float64Array(nodeCount);
+      const previous = new Int32Array(nodeCount);
+      distance.fill(Number.POSITIVE_INFINITY);
+      previous.fill(-1);
+      distance[source] = 0;
+
+      const heap = new MinHeap();
+      heap.push(source, 0);
+
+      let settled = 0;
+      while (!heap.isEmpty()) {
+        const item = heap.pop();
+        if (item.distance !== distance[item.vertex]) {
+          continue;
+        }
+        if (item.vertex === target) {
+          break;
+        }
+
+        const begin = offsets[item.vertex];
+        const end = offsets[item.vertex + 1];
+        for (let edgeIndex = begin; edgeIndex < end; edgeIndex += 1) {
+          const nextVertex = to[edgeIndex];
+          const nextDistance = item.distance + weight[edgeIndex];
+          if (nextDistance < distance[nextVertex]) {
+            distance[nextVertex] = nextDistance;
+            previous[nextVertex] = item.vertex;
+            heap.push(nextVertex, nextDistance);
+          }
+        }
+
+        settled += 1;
+        if (settled % 20000 === 0) {
+          setStatus(`正在计算最短路径...\n已处理节点约 ${formatNumber(settled)} 个`, false);
+          await yieldToUI();
+        }
+      }
+
+      state.selection.computing = false;
+      if (!Number.isFinite(distance[target])) {
+        state.selection.pathVertexIds = [];
+        state.selection.pathDistance = null;
+        updateSelectionControls();
+        setStatus(`没有找到 ${sourceId} 到 ${targetId} 的路径。`, true);
+        requestRender();
+        return;
+      }
+
+      const pathVertexIds = [];
+      let cursor = target;
+      while (cursor !== -1) {
+        pathVertexIds.push(cursor + 1);
+        if (cursor === source) {
+          break;
+        }
+        cursor = previous[cursor];
+      }
+      pathVertexIds.reverse();
+
+      state.selection.pathVertexIds = pathVertexIds;
+      state.selection.pathDistance = distance[target];
+      updateSelectionControls();
+      setStatus(
+        [
+          "最短路径计算完成。",
+          `起点: ${sourceId}`,
+          `终点: ${targetId}`,
+          `路径长度: ${formatNumber(Math.round(distance[target]))}`,
+          `路径顶点数: ${formatNumber(pathVertexIds.length)}`
+        ].join("\n"),
+        false
+      );
+      requestRender();
+    }
+
+    class MinHeap {
+      constructor() {
+        this.items = [];
+      }
+
+      push(vertex, distance) {
+        const item = { vertex, distance };
+        this.items.push(item);
+        this.bubbleUp(this.items.length - 1);
+      }
+
+      pop() {
+        const root = this.items[0];
+        const tail = this.items.pop();
+        if (this.items.length > 0) {
+          this.items[0] = tail;
+          this.bubbleDown(0);
+        }
+        return root;
+      }
+
+      isEmpty() {
+        return this.items.length === 0;
+      }
+
+      bubbleUp(index) {
+        while (index > 0) {
+          const parent = (index - 1) >> 1;
+          if (this.items[parent].distance <= this.items[index].distance) {
+            break;
+          }
+          [this.items[parent], this.items[index]] = [this.items[index], this.items[parent]];
+          index = parent;
+        }
+      }
+
+      bubbleDown(index) {
+        const length = this.items.length;
+        while (true) {
+          let smallest = index;
+          const left = index * 2 + 1;
+          const right = left + 1;
+          if (left < length && this.items[left].distance < this.items[smallest].distance) {
+            smallest = left;
+          }
+          if (right < length && this.items[right].distance < this.items[smallest].distance) {
+            smallest = right;
+          }
+          if (smallest === index) {
+            break;
+          }
+          [this.items[smallest], this.items[index]] = [this.items[index], this.items[smallest]];
+          index = smallest;
+        }
+      }
+    }
+  </script>
+</body>
+</html>
