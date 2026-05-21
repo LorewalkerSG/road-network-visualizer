@@ -1,4 +1,4 @@
-# visualize_roadnetwork
+# road-network-visualizer
 
 This project converts OpenStreetMap data into a road network graph and visualizes it interactively in the browser.
 
